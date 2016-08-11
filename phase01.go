@@ -64,6 +64,7 @@ type MsMessageToSend struct {
 	To            string            `json:"-"`                  // Desitnation work Q - a name -
 	ClientTimeout uint64            `json:"-"`                  // How long are you giving client to perform task
 	Params        []MsMessageParams `json:"Params"`             // Set of params for client
+	IsTimeout     bool              `json:"-"`                  // set on reply
 }
 
 type ReplyFxType struct {
@@ -77,23 +78,28 @@ type ReplyFxType struct {
 
 // Redis Connect Info ( 2 channels )
 type MsCfgType struct {
-	ServerId            string                  `json:"Sid"`              //
-	Name                string                  `json:"QName"`            //	// Name of the Q to send stuff to //
-	ReplyTTL            uint64                  `json:"ReplyTTL"`         // how long will a reply last if not picked up.
-	isRedisConnected    bool                    `json:"-"`                // If connect to redis has occured for wakie-wakie calls
-	RedisConnectHost    string                  `json:"RedisConnectHost"` // Connection infor for Redis Database
-	RedisConnectPort    string                  `json:"RedisConnectPort"` //
-	RedisConnectAuth    string                  `json:"RedisConnectAuth"` //
-	ReplyListenQ        string                  `json:"ReplyListenQ"`     // Receives Wakie Wakie on Return
-	RedisPool           *pool.Pool              `json:"-"`                // Pooled Redis Client connectioninformation
-	Err                 error                   `json:"-"`                // Error Holding Pen
-	subClient           *pubsub.SubClient       `json:"-"`                //
-	subChan             chan *pubsub.SubResp    `json:"-"`                //
-	timeout             chan bool               `json:"-"`                //
-	ReplyFx             map[string]*ReplyFxType `json:"-"`                //	Set of call/respond that we are waiting for answers on.
-	DebugTimeoutMessage bool                    `json:"-"`                // turn on/off the timeout 1ce a second message
-	TickInMilliseconds  int                     `json:"-"`                // # of miliseconds for 1 tick
-	// conn                *redis.Client           `json:"-"`                // A connection
+	ServerId            string                              `json:"Sid"`              //
+	Name                string                              `json:"QName"`            //	// Name of the Q to send stuff to //
+	ReplyTTL            uint64                              `json:"ReplyTTL"`         // how long will a reply last if not picked up.
+	isRedisConnected    bool                                `json:"-"`                // If connect to redis has occured for wakie-wakie calls
+	RedisConnectHost    string                              `json:"RedisConnectHost"` // Connection infor for Redis Database
+	RedisConnectPort    string                              `json:"RedisConnectPort"` //
+	RedisConnectAuth    string                              `json:"RedisConnectAuth"` //
+	ReplyListenQ        string                              `json:"ReplyListenQ"`     // Receives Wakie Wakie on Return
+	RedisPool           *pool.Pool                          `json:"-"`                // Pooled Redis Client connectioninformation
+	Err                 error                               `json:"-"`                // Error Holding Pen
+	subClient           *pubsub.SubClient                   `json:"-"`                //
+	subChan             chan *pubsub.SubResp                `json:"-"`                //
+	timeout             chan bool                           `json:"-"`                //
+	ReplyFx             map[string]*ReplyFxType             `json:"-"`                //	Set of call/respond that we are waiting for answers on.
+	DebugTimeoutMessage bool                                `json:"-"`                // turn on/off the timeout 1ce a second message
+	TickInMilliseconds  int                                 `json:"-"`                // # of miliseconds for 1 tick
+	ReplyFunc           func(replyMessage *MsMessageToSend) // function that will get when reply occures
+}
+
+var replyChan chan *MsMessageToSend //  the reply will happen on this channel
+func init() {
+	replyChan = make(chan *MsMessageToSend, 1)
 }
 
 type WorkFuncType func(arb map[string]interface{})
@@ -194,8 +200,16 @@ func (ms *MsCfgType) SendMessage(mm *MsMessageToSend) {
 			if isTimeOut {
 				fmt.Fprintf(os.Stderr, "%sFx Called! Failed to get a reply to %s in a timely fashion, %s%s\n", MiscLib.ColorYellow, godebug.SVar(origMsg), godebug.LF(), MiscLib.ColorReset)
 				// should put call/NIL/isTimeOut on chanel and send it to waiting stuff on this side
+				if ms.ReplyFunc != nil {
+					replyMessage.IsTimeout = true
+					replyChan <- &origMsg
+				}
 			} else {
 				fmt.Fprintf(os.Stderr, "%sFx Called! Reply to orig=%s is reply=-->>%s<<--, %s%s\n", MiscLib.ColorGreen, godebug.SVar(origMsg), godebug.SVar(replyMessage), godebug.LF(), MiscLib.ColorReset)
+				if ms.ReplyFunc != nil {
+					origMsg.IsTimeout = false
+					replyChan <- replyMessage
+				}
 			}
 		},
 	}
@@ -504,6 +518,26 @@ func (ms *MsCfgType) ListenForServer(doWork WorkFuncType, wg *sync.WaitGroup) { 
 
 }
 
+func (ms *MsCfgType) SetReplyFunc(fx func(replyMessage *MsMessageToSend)) {
+	ms.ReplyFunc = fx
+}
+
+func (ms *MsCfgType) WaitForReply() {
+	var mr *MsMessageToSend //  the reply will happen on this channel
+	// type MsMessageToSend struct {
+	for {
+		select {
+		case mr = <-replyChan:
+			if db12 {
+				fmt.Fprintf(os.Stderr, "%s**** Got a reply, mr=%s, isTimeout=%v, AT:%s%s\n", MiscLib.ColorCyan, godebug.SVar(mr), mr.IsTimeout, godebug.LF(), MiscLib.ColorReset)
+			}
+			if ms.ReplyFunc != nil {
+				ms.ReplyFunc(mr) // function that will get when reply occures
+			}
+		}
+	}
+}
+
 // ReceiveGroupReply() is the way to receive a reply to a group or timeout reply to a group of message.  It will call it's worker function as
 // soon as all of the group have had a reply or when the timeout specified occures.
 //
@@ -702,6 +736,7 @@ func UUIDAsStrPacked() (s_id string) {
 const db1 = false
 const db4 = false
 const db11 = false
+const db12 = true
 const repoll_db = false
 
 /* vim: set noai ts=4 sw=4: */
