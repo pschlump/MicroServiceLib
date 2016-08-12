@@ -97,10 +97,8 @@ type MsCfgType struct {
 	ReplyFunc           func(replyMessage *MsMessageToSend) // function that will get when reply occures
 }
 
-var replyChan chan *MsMessageToSend //  the reply will happen on this channel
-func init() {
-	replyChan = make(chan *MsMessageToSend, 1)
-}
+//func init() {
+//}
 
 type WorkFuncType func(arb map[string]interface{})
 
@@ -191,27 +189,38 @@ func (ms *MsCfgType) SendMessage(mm *MsMessageToSend) {
 	mdata["ServerId"] = ms.ServerId
 	mm.SendBackTo = sizlib.Qt(ms.ReplyListenQ, mdata)
 
+	var wg sync.WaitGroup
+
+	createReplyFunc := func() func(replyMessage *MsMessageToSend, rx *ReplyFxType, isTimeOut bool) {
+		fx := ms.ReplyFunc
+		origMsg := *mm
+		if fx != nil {
+			wg.Add(1)
+		}
+		return func(replyMessage *MsMessageToSend, rx *ReplyFxType, isTimeOut bool) {
+			if isTimeOut {
+				fmt.Fprintf(os.Stderr, "%sFx Called! Failed to get a reply to %s in a timely fashion, %s%s\n", MiscLib.ColorYellow, godebug.SVar(origMsg), godebug.LF(), MiscLib.ColorReset)
+				if fx != nil {
+					origMsg.IsTimeout = true
+					fx(&origMsg) // function that will get when reply occures
+					wg.Done()
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "%sFx Called! Reply to orig=%s is reply=-->>%s<<--, %s%s\n", MiscLib.ColorGreen, godebug.SVar(origMsg), godebug.SVar(replyMessage), godebug.LF(), MiscLib.ColorReset)
+				if fx != nil {
+					replyMessage.IsTimeout = false
+					fx(replyMessage) // function that will get when reply occures
+					wg.Done()
+				}
+			}
+		}
+	}
+
 	ms.ReplyFx[mm.CallId] = &ReplyFxType{
 		Key:       mm.CallId,
 		TickCount: 0,
 		TickMax:   20,
-		Fx: func(replyMessage *MsMessageToSend, rx *ReplyFxType, isTimeOut bool) {
-			origMsg := *mm
-			if isTimeOut {
-				fmt.Fprintf(os.Stderr, "%sFx Called! Failed to get a reply to %s in a timely fashion, %s%s\n", MiscLib.ColorYellow, godebug.SVar(origMsg), godebug.LF(), MiscLib.ColorReset)
-				// should put call/NIL/isTimeOut on chanel and send it to waiting stuff on this side
-				if ms.ReplyFunc != nil {
-					replyMessage.IsTimeout = true
-					replyChan <- &origMsg
-				}
-			} else {
-				fmt.Fprintf(os.Stderr, "%sFx Called! Reply to orig=%s is reply=-->>%s<<--, %s%s\n", MiscLib.ColorGreen, godebug.SVar(origMsg), godebug.SVar(replyMessage), godebug.LF(), MiscLib.ColorReset)
-				if ms.ReplyFunc != nil {
-					origMsg.IsTimeout = false
-					replyChan <- replyMessage
-				}
-			}
-		},
+		Fx:        createReplyFunc(),
 	}
 
 	// 1. Put mesage on work Q
@@ -233,6 +242,8 @@ func (ms *MsCfgType) SendMessage(mm *MsMessageToSend) {
 	fmt.Fprintf(os.Stderr, `%sPUBLISH "%s" "%s"`+"%s\n", MiscLib.ColorGreen, key, pmsg, MiscLib.ColorReset)
 	err = conn.Cmd("PUBLISH", key, pmsg).Err
 	// xyzzy00002 - do somethig with err
+
+	wg.Wait()
 
 	return
 }
@@ -518,24 +529,10 @@ func (ms *MsCfgType) ListenForServer(doWork WorkFuncType, wg *sync.WaitGroup) { 
 
 }
 
+// SetReplyFunc needs to be called before sending a message if you want a call/responce type operation.
+// If you want message send and forget then do not call this with a 'fx', leave ms.ReplyFunc nil.
 func (ms *MsCfgType) SetReplyFunc(fx func(replyMessage *MsMessageToSend)) {
 	ms.ReplyFunc = fx
-}
-
-func (ms *MsCfgType) WaitForReply() {
-	var mr *MsMessageToSend //  the reply will happen on this channel
-	// type MsMessageToSend struct {
-	for {
-		select {
-		case mr = <-replyChan:
-			if db12 {
-				fmt.Fprintf(os.Stderr, "%s**** Got a reply, mr=%s, isTimeout=%v, AT:%s%s\n", MiscLib.ColorCyan, godebug.SVar(mr), mr.IsTimeout, godebug.LF(), MiscLib.ColorReset)
-			}
-			if ms.ReplyFunc != nil {
-				ms.ReplyFunc(mr) // function that will get when reply occures
-			}
-		}
-	}
 }
 
 // ReceiveGroupReply() is the way to receive a reply to a group or timeout reply to a group of message.  It will call it's worker function as
@@ -714,6 +711,24 @@ func (hdlr *MsCfgType) AddToFnMap(replace, fn, origFn, mt string) {
 // ms.AddToFnMap(ms.GenCacheFn(id, path), url)
 func (hdlr *MsCfgType) GenCacheFn(id, pth, urlPath string) string {
 	return urlPath + "/" + id
+}
+
+func GetParam(Params []MsMessageParams, name string) string {
+	for _, vv := range Params {
+		if vv.Name == name {
+			return vv.Value
+		}
+	}
+	return ""
+}
+
+func GetParamIndex(Params []MsMessageParams, name string) int {
+	for ii, vv := range Params {
+		if vv.Name == name {
+			return ii
+		}
+	}
+	return -1
 }
 
 const ReturnPacked = true
