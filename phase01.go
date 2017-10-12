@@ -392,7 +392,7 @@ func (ms *MsCfgType) ListenFor() { // server *socketio.Server) {
 
 						v, err := conn.Cmd("GET", key).Str()
 						if err != nil {
-							if db4 {
+							if db2 {
 								fmt.Fprintf(os.Stderr, "%sError on redis - did not find reply key - get(%s): %s, %s%s\n", MiscLib.ColorRed, key, err, godebug.LF(), MiscLib.ColorReset)
 							}
 							errFound = true
@@ -584,12 +584,27 @@ func (hdlr *MsCfgType) ConnectToRedis() bool {
 		// logrus.Fatalf("Error: Failed to connect to redis-server.\n")
 		return false
 	} else {
-		if db11 {
+		if db3 {
 			fmt.Fprintf(os.Stderr, "%sSuccess: Connected to redis-server.%s\n", MiscLib.ColorGreen, MiscLib.ColorReset)
 		}
 	}
 
 	return true
+}
+
+func (ms *MsCfgType) SetDbFlag(flag string, val bool) {
+	switch flag {
+	case "db1":
+		db1 = val
+	case "db2":
+		db2 = val
+	case "db3":
+		db3 = val
+	case "repoll_db":
+		repoll_db = val
+	default:
+		fmt.Fprintf(os.Stderr, "*** Error - invalid debug flag %s, should be db1, db2, db3, repoll_db ***\n", flag)
+	}
 }
 
 /*
@@ -675,7 +690,7 @@ func (hdlr *MsCfgType) AddToFnMap(replace, fn, origFn, mt string) {
 
 	err = conn.Cmd("SET", key, value).Err
 	if err != nil {
-		if db4 {
+		if db2 {
 			fmt.Printf("Error on redis - file data not saved - get(%s): %s\n", key, err)
 		}
 		return
@@ -697,7 +712,7 @@ func (hdlr *MsCfgType) AddToFnMap(replace, fn, origFn, mt string) {
 	//
 	//	err = conn.Cmd("SET", key1, value1).Err
 	//	if err != nil {
-	//		if db4 {
+	//		if db2 {
 	//			fmt.Printf("Error on redis - file data not saved - get(%s): %s\n", key1, err)
 	//		}
 	//		return
@@ -748,10 +763,11 @@ func UUIDAsStrPacked() (s_id string) {
 	}
 }
 
-const db1 = false
-const db4 = false
-const db11 = false
-const db12 = true
-const repoll_db = false
+var db1 = true
+var db2 = false
+var db3 = false
+
+// var db12 = true
+var repoll_db = false
 
 /* vim: set noai ts=4 sw=4: */
