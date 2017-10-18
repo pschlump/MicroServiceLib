@@ -24,9 +24,6 @@ import (
 	"github.com/taskcluster/slugid-go/slugid"
 )
 
-// "www.2c-why.com/h2ppp/lib/H2pppCommon"
-// "github.com/pschlump/Go-FTL/server/sizlib"
-
 //
 // xyzzy - q size, notify on q larger than X or q wait longer than x
 // xyzzy - q action - if q larger than X then ... -- start server --
